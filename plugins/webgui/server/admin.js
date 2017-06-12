@@ -84,6 +84,7 @@ exports.editServer = (req, res) => {
   req.checkBody('port', 'Invalid port').isInt({min: 1, max: 65535});
   req.checkBody('password', 'Invalid password').notEmpty();
   req.checkBody('method', 'Invalid method').notEmpty();
+  req.checkBody('scale', 'Invalid scale').notEmpty();
   req.getValidationResult().then(result => {
     if(result.isEmpty()) {
       const address = req.body.address;
@@ -106,7 +107,8 @@ exports.editServer = (req, res) => {
     const port = +req.body.port;
     const password = req.body.password;
     const method = req.body.method;
-    return serverManager.edit(serverId, name, address, port, password, method);
+    const scale = req.body.scale;
+    return serverManager.edit(serverId, name, address, port, password, method, scale);
   }).then(success => {
     res.send('success');
   }).catch(err => {
@@ -172,11 +174,9 @@ exports.getAccountByPort = (req, res) => {
 };
 
 exports.getOneAccount = (req, res) => {
-  const accountId = req.params.accountId;
-  account.getAccount().then(success => {
-    const accountInfo = success.filter(f => {
-      return f.id === +accountId;
-    })[0];
+  const accountId = +req.params.accountId;
+  account.getAccount({ id: accountId }).then(success => {
+    const accountInfo = success[0];
     if(accountInfo) {
       accountInfo.data = JSON.parse(accountInfo.data);
       if(accountInfo.type >= 2 && accountInfo.type <= 5) {
@@ -194,9 +194,10 @@ exports.getOneAccount = (req, res) => {
           accountInfo.data.to = accountInfo.data.from + time[accountInfo.type];
         }
       }
+      accountInfo.server = accountInfo.server ? JSON.parse(accountInfo.server) : accountInfo.server;
       return res.send(accountInfo);
     }
-    Promise.reject('account not found');
+    return res.status(403).end();
   }).catch(err => {
     console.log(err);
     res.status(403).end();
@@ -266,6 +267,7 @@ exports.changeAccountData = (req, res) => {
     limit: +req.body.limit,
     flow: +req.body.flow,
     autoRemove: +req.body.autoRemove,
+    server: req.body.server,
   }).then(success => {
     res.send('success');
   }).catch(err => {
@@ -392,9 +394,18 @@ exports.getServerPortFlow = (req, res) => {
           i++;
         }
       }
-      return flow.getServerPortFlow(serverId, port, timeArray);
+      return knex('webguiSetting').select().where({ key: 'system' })
+      .then(success => {
+        if(!success.length) {
+          return Promise.reject('settings not found');
+        }
+        success[0].value = JSON.parse(success[0].value);
+        return success[0].value.multiServerFlow;
+      }).then(isMultiServerFlow => {
+        return flow.getServerPortFlow(serverId, port, timeArray, isMultiServerFlow);
+      });
     } else {
-      return [0];
+      return [ 0 ];
     }
   }).then(success => {
     res.send(success);
@@ -440,6 +451,14 @@ exports.getUsers = (req, res) => {
     search,
     sort,
   }).then(success => {
+    success.users = success.users.map(m => {
+      return {
+        id: m.id,
+        email: m.email,
+        lastLogin: m.lastLogin,
+        username: m.username,
+      };
+    });
     return res.send(success);
   }).catch(err => {
     console.log(err);
@@ -465,6 +484,17 @@ exports.getRecentLoginUsers = (req, res) => {
   });
 };
 
+exports.getRecentOrders = (req, res) => {
+  alipay.orderListAndPaging({
+    pageSize: 5,
+  }).then(success => {
+    return res.send(success.orders);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
 exports.getOneUser = (req, res) => {
   const userId = req.params.userId;
   let userInfo = null;
@@ -476,6 +506,16 @@ exports.getOneUser = (req, res) => {
       return f.userId === +userId;
     });
     return res.send(userInfo);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.deleteUser = (req, res) => {
+  const userId = req.params.userId;
+  user.delete(userId).then(success => {
+    return res.send('success');
   }).catch(err => {
     console.log(err);
     res.status(403).end();
@@ -551,6 +591,39 @@ exports.getOrders = (req, res) => {
   alipay.orderListAndPaging(options)
   .then(success => {
     res.send(success);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.getUserPortLastConnect = (req, res) => {
+  const port = +req.params.port;
+  flow.getUserPortLastConnect(port).then(success => {
+    return res.send(success);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.addUser = (req, res) => {
+  req.checkBody('email', 'Invalid email').notEmpty();
+  req.checkBody('password', 'Invalid password').notEmpty();
+  req.getValidationResult().then(result => {
+    if(result.isEmpty()) {
+      const email = req.body.email;
+      const password = req.body.password;
+      return user.add({
+        username: email,
+        email,
+        password,
+        type: 'normal',
+      });
+    }
+    result.throw();
+  }).then(success => {
+    return res.send(success);
   }).catch(err => {
     console.log(err);
     res.status(403).end();

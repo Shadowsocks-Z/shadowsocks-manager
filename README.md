@@ -131,7 +131,7 @@ The listening address in `--manager-address` of step 1 and in `shadowsocks -> ad
 `[================100%]` [user]()  
 `[================100%]` [freeAccount](https://github.com/shadowsocks/shadowsocks-manager/blob/master/plugins/freeAccount/README.md)  
 `[================100%]` [account]()  
-`[===============90%--]` [webgui](https://github.com/shadowsocks/shadowsocks-manager/blob/master/plugins/webgui/README.md)  
+`[================95%-]` [webgui](https://github.com/shadowsocks/shadowsocks-manager/blob/master/plugins/webgui/README.md)  
 `[================100%]` [alipay]()  
 
 ### Parameter
@@ -159,7 +159,7 @@ Usage: ssmgr [options]
 First, ssmgr will read the config file in `--config`, and other parameters(`-detsmp`) will replace the config file values.
 
 ### Telegram
-Join the group if you have some problem: [https://t.me/joinchat/AAAAAAocQVv8fK_K6JDBgw](https://t.me/joinchat/AAAAAAocQVv8fK_K6JDBgw)
+Join the group if you have some problem: [https://t.me/ssmgr](https://t.me/ssmgr)
 
 ### Donate
 If you find this project helpful, please consider making a donation:  

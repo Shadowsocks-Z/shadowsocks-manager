@@ -1,5 +1,3 @@
-'use strict';
-
 const knex = appRequire('init/knex').knex;
 const config = appRequire('services/config').all();
 const moment = require('moment');
@@ -198,7 +196,10 @@ const splitTime = (start, end) => {
   return time;
 };
 
-const getFlowFromSplitTime = async (serverId, start, end) => {
+const getFlowFromSplitTime = async (serverId, port, start, end) => {
+  let where = {};
+  if(serverId) { where.id = serverId; }
+  if(port) { where.port = port; }
   const time = splitTime(start, end);
   const sum = [];
   const getFlow = (tableName, startTime, endTime) => {
@@ -206,7 +207,7 @@ const getFlowFromSplitTime = async (serverId, start, end) => {
     .sum('flow as sumFlow')
     .groupBy('id')
     .select(['id'])
-    .where({ id: serverId })
+    .where(where)
     .whereBetween('time', [startTime, endTime - 1]).then(success => {
       if(success[0]) { return success[0].sumFlow; }
       return 0;
@@ -238,77 +239,58 @@ const getServerFlow = async (serverId, timeArray) => {
     const startTime = +time;
     const endTime = +timeArray[index + 1];
     let getFlow;
-    // result.push(getFlowFromSplitTime(serverId, startTime, endTime));
-    if(isDay(startTime, endTime)) {
-      getFlow = knex('saveFlowDay')
-      .sum('flow as sumFlow')
-      .groupBy('id')
-      .select(['id'])
-      .where({ id: serverId })
-      .whereBetween('time', [startTime, endTime - 1]).then(success => {
-        if(success[0]) { return success[0].sumFlow; }
-        return 0;
-      });
-    } else if(isHour(startTime, endTime)) {
-      getFlow = knex('saveFlowHour')
-      .sum('flow as sumFlow')
-      .groupBy('id')
-      .select(['id'])
-      .where({ id: serverId })
-      .whereBetween('time', [startTime, endTime - 1]).then(success => {
-        if(success[0]) { return success[0].sumFlow; }
-        return 0;
-      });
-    } else if(is5min(startTime, endTime)) {
-      getFlow = knex('saveFlow5min')
-      .sum('flow as sumFlow')
-      .groupBy('id')
-      .select(['id'])
-      .where({ id: serverId })
-      .whereBetween('time', [startTime, endTime - 1]).then(success => {
-        if(success[0]) { return success[0].sumFlow; }
-        return 0;
-      });
-    } else {
-      getFlow = knex('saveFlow')
-      .sum('flow as sumFlow')
-      .groupBy('id')
-      .select(['id'])
-      .where({ id: serverId })
-      .whereBetween('time', [startTime, endTime - 1]).then(success => {
-        if(success[0]) { return success[0].sumFlow; }
-        return 0;
-      });
-    }
-    result.push(getFlow);
+    result.push(getFlowFromSplitTime(serverId, 0, startTime, endTime));
   });
   return Promise.all(result);
 };
 
-const getServerPortFlow = async (serverId, port, timeArray) => {
+const getServerPortFlow = async (serverId, port, timeArray, isMultiServerFlow) => {
+  // const result = [];
+  // timeArray.forEach((time, index) => {
+  //   if(index === timeArray.length - 1) {
+  //     return;
+  //   }
+  //   const startTime = time;
+  //   const endTime = timeArray[index + 1];
+  //   const getFlow = knex('saveFlow')
+  //   .sum('flow as sumFlow')
+  //   .groupBy('port')
+  //   .select(['port'])
+  //   .where(isMultiServerFlow ? { port } : { id: serverId, port })
+  //   .whereBetween('time', [startTime, endTime]).then(success => {
+  //     if(success[0]) { return success[0].sumFlow; }
+  //     return 0;
+  //   });
+  //   result.push(getFlow);
+  // });
+  // return Promise.all(result);
   const result = [];
   timeArray.forEach((time, index) => {
     if(index === timeArray.length - 1) {
       return;
     }
-    const startTime = time;
-    const endTime = timeArray[index + 1];
-    const getFlow = knex('saveFlow')
-    .sum('flow as sumFlow')
-    .groupBy('port')
-    .select(['port'])
-    .where({ id: serverId, port })
-    .whereBetween('time', [startTime, endTime]).then(success => {
-      if(success[0]) { return success[0].sumFlow; }
-      return 0;
-    });
-    result.push(getFlow);
+    const startTime = +time;
+    const endTime = +timeArray[index + 1];
+    let getFlow;
+    result.push(getFlowFromSplitTime(isMultiServerFlow ? 0 : serverId, port, startTime, endTime));
   });
   return Promise.all(result);
 };
 
-const getlastConnectTime = (serverId, port) => {
-  return knex('saveFlow')
+const getlastConnectTime = async (serverId, port) => {
+  const lastConnectFromSaveFlow = await knex('saveFlow')
+  .select(['time'])
+  .where({ id: serverId, port })
+  .orderBy('time', 'desc').limit(1).then(success => {
+    if(success[0]) {
+      return success[0].time;
+    }
+    return 0;
+  });
+  if(lastConnectFromSaveFlow) {
+    return { lastConnect: lastConnectFromSaveFlow };
+  }
+  return knex('saveFlow5min')
   .select(['time'])
   .where({ id: serverId, port })
   .orderBy('time', 'desc').limit(1).then(success => {
@@ -319,30 +301,53 @@ const getlastConnectTime = (serverId, port) => {
   });
 };
 
+const getUserPortLastConnect = async port => {
+  const lastConnectFromSaveFlow = await knex('saveFlow')
+  .select(['time'])
+  .where({ port })
+  .orderBy('time', 'desc').limit(1).then(success => {
+    if(success[0]) {
+      return success[0].time;
+    }
+    return 0;
+  });
+  if(lastConnectFromSaveFlow) {
+    return { lastConnect: lastConnectFromSaveFlow };
+  }
+  return knex('saveFlow5min')
+  .select(['time'])
+  .where({ port })
+  .orderBy('time', 'desc').limit(1).then(success => {
+    if(success[0]) {
+      return { lastConnect: success[0].time };
+    }
+    return { lastConnect: 0 };
+  });
+};
+
 const getServerUserFlow = (serverId, timeArray) => {
-  return knex('saveFlow').sum('saveFlow.flow as flow')
+  return knex('saveFlow5min').sum('saveFlow5min.flow as flow')
   .select([
-    'saveFlow.port',
+    'saveFlow5min.port',
     'user.userName',
   ])
-  .groupBy('saveFlow.port')
-  .leftJoin('account_plugin', 'account_plugin.port', 'saveFlow.port')
+  .groupBy('saveFlow5min.port')
+  .leftJoin('account_plugin', 'account_plugin.port', 'saveFlow5min.port')
   .leftJoin('user', 'account_plugin.userId', 'user.id')
   .where({
-    'saveFlow.id': +serverId,
-  }).whereBetween('saveFlow.time', timeArray);
+    'saveFlow5min.id': +serverId,
+  }).whereBetween('saveFlow5min.time', timeArray);
 };
 
 const getAccountServerFlow = (accountId, timeArray) => {
-  return knex('saveFlow').sum('saveFlow.flow as flow').groupBy('saveFlow.id')
+  return knex('saveFlow5min').sum('saveFlow5min.flow as flow').groupBy('saveFlow5min.id')
   .select([
     'server.name',
   ])
-  .leftJoin('server', 'server.id', 'saveFlow.id')
-  .leftJoin('account_plugin', 'account_plugin.port', 'saveFlow.port')
+  .leftJoin('server', 'server.id', 'saveFlow5min.id')
+  .leftJoin('account_plugin', 'account_plugin.port', 'saveFlow5min.port')
   .where({ 'account_plugin.id': accountId })
-  .whereBetween('saveFlow.time', timeArray);
-  ;
+  .whereBetween('saveFlow5min.time', timeArray);
 };
 
 exports.getFlow = getFlow;
@@ -351,3 +356,4 @@ exports.getServerPortFlow = getServerPortFlow;
 exports.getServerUserFlow = getServerUserFlow;
 exports.getlastConnectTime = getlastConnectTime;
 exports.getAccountServerFlow = getAccountServerFlow;
+exports.getUserPortLastConnect = getUserPortLastConnect;

@@ -91,10 +91,12 @@ app.factory('adminApi', ['$http', '$q', 'moment', 'preload', '$timeout', ($http,
     indexInfoPromise = $q.all([
       $http.get('/api/admin/user/recentSignUp').then(success => success.data),
       $http.get('/api/admin/user/recentLogin').then(success => success.data),
+      $http.get('/api/admin/order/recentOrder').then(success => success.data),
     ]).then(success => {
       return {
         signup: success[0],
         login: success[1],
+        order: success[2],
       };
     });
     return indexInfoPromise;
@@ -137,13 +139,13 @@ app.factory('adminApi', ['$http', '$q', 'moment', 'preload', '$timeout', ($http,
     const id = `getChartData:${ serverId }:${ type }:${ queryTime }`;
     const promise = () => {
       return $q.all([
-        $http.get('/api/admin/flow/' + serverId, {
+        $http.get(`/api/admin/flow/${ serverId }`, {
           params: {
             type,
             time: queryTime,
           }
         }),
-        $http.get('/api/admin/flow/' + serverId + '/user', {
+        $http.get(`/api/admin/flow/${ serverId }/user`, {
           params: {
             type,
             time: queryTime,
@@ -212,6 +214,10 @@ app.factory('adminApi', ['$http', '$q', 'moment', 'preload', '$timeout', ($http,
     return preload.get(id, promise, 60 * 1000);
   };
 
+  const getUserPortLastConnect = port => {
+    return $http.get(`/api/admin/user/${ port }/lastConnect`).then(success => success.data);
+  };
+
   return {
     getUser,
     getOrder,
@@ -225,5 +231,6 @@ app.factory('adminApi', ['$http', '$q', 'moment', 'preload', '$timeout', ($http,
     getUserData,
     getChartData,
     getAccountChartData,
+    getUserPortLastConnect,
   };
 }]);

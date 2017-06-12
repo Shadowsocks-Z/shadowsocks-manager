@@ -1,5 +1,3 @@
-'use strict';
-
 const knex = appRequire('init/knex').knex;
 const serverManager = appRequire('plugins/flowSaver/server');
 const manager = appRequire('services/manager');
@@ -94,6 +92,7 @@ const editAccount = async (id, options) => {
   update.type = options.type;
   update.userId = options.userId;
   update.autoRemove = options.autoRemove;
+  update.server = options.server ? JSON.stringify(options.server) : null;
   if(options.type === 1) {
     update.data = null;
     update.port = +options.port;
@@ -225,7 +224,9 @@ const setAccountLimit = async (userId, accountId, orderType) => {
   if(orderType === 7) { limit = 12; }
   const flow = {};
   for (const p in payType) {
-    flow[payType[p]] = config.plugins.account.pay[p].flow;
+    if(config.plugins.account.pay[p]) {
+      flow[payType[p]] = config.plugins.account.pay[p].flow;
+    }
   };
   if(!accountId) {
     const port = await knex('account_plugin').select()

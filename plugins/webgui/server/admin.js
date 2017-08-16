@@ -6,127 +6,12 @@ const user = appRequire('plugins/user/index');
 const knex = appRequire('init/knex').knex;
 const moment = require('moment');
 const alipay = appRequire('plugins/alipay/index');
-
-exports.getServers = (req, res) => {
-  serverManager.list().then(success => {
-    res.send(success);
-  }).catch(err => {
-    console.log(err);
-    res.status(500).end();
-  });
-};
-
-exports.getOneServer = (req, res) => {
-  const serverId = req.params.serverId;
-  let result = null;
-  knex('server').select().where({
-    id: +serverId,
-  }).then(success => {
-    if(success.length) {
-      result = success[0];
-      return manager.send({
-        command: 'list',
-      }, {
-        host: success[0].host,
-        port: success[0].port,
-        password: success[0].password,
-      });
-    }
-    res.status(404).end();
-  }).then(success => {
-    result.ports = success;
-    res.send(result);
-  }).catch(err => {
-    console.log(err);
-    res.status(500).end();
-  });
-};
-
-exports.addServer = (req, res) => {
-  req.checkBody('name', 'Invalid name').notEmpty();
-  req.checkBody('address', 'Invalid address').notEmpty();
-  req.checkBody('port', 'Invalid port').isInt({min: 1, max: 65535});
-  req.checkBody('password', 'Invalid password').notEmpty();
-  req.checkBody('method', 'Invalid method').notEmpty();
-  req.getValidationResult().then(result => {
-    if(result.isEmpty()) {
-      const address = req.body.address;
-      const port = +req.body.port;
-      const password = req.body.password;
-      return manager.send({
-        command: 'flow',
-        options: { clear: false, },
-      }, {
-        host: address,
-        port,
-        password,
-      });
-    }
-    result.throw();
-  }).then(success => {
-    const name = req.body.name;
-    const address = req.body.address;
-    const port = +req.body.port;
-    const password = req.body.password;
-    const method = req.body.method;
-    return serverManager.add(name, address, port, password, method);
-  }).then(success => {
-    res.send('success');
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
-exports.editServer = (req, res) => {
-  req.checkBody('name', 'Invalid name').notEmpty();
-  req.checkBody('address', 'Invalid address').notEmpty();
-  req.checkBody('port', 'Invalid port').isInt({min: 1, max: 65535});
-  req.checkBody('password', 'Invalid password').notEmpty();
-  req.checkBody('method', 'Invalid method').notEmpty();
-  req.checkBody('scale', 'Invalid scale').notEmpty();
-  req.getValidationResult().then(result => {
-    if(result.isEmpty()) {
-      const address = req.body.address;
-      const port = +req.body.port;
-      const password = req.body.password;
-      return manager.send({
-        command: 'flow',
-        options: { clear: false, },
-      }, {
-        host: address,
-        port,
-        password,
-      });
-    }
-    result.throw();
-  }).then(success => {
-    const serverId = req.params.serverId;
-    const name = req.body.name;
-    const address = req.body.address;
-    const port = +req.body.port;
-    const password = req.body.password;
-    const method = req.body.method;
-    const scale = req.body.scale;
-    return serverManager.edit(serverId, name, address, port, password, method, scale);
-  }).then(success => {
-    res.send('success');
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
-exports.deleteServer = (req, res) => {
-  const serverId = req.params.serverId;
-  serverManager.del(serverId)
-  .then(success => {
-    res.send('success');
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
+const paypal = appRequire('plugins/paypal/index');
+const email = appRequire('plugins/email/index');
+const config = appRequire('services/config').all();
+const isAlipayUse = config.plugins.alipay && config.plugins.alipay.use;
+const isPaypalUse = config.plugins.paypal && config.plugins.paypal.use;
+const rp = require('request-promise');
 
 exports.getAccount = (req, res) => {
   account.getAccount().then(success => {
@@ -276,170 +161,6 @@ exports.changeAccountData = (req, res) => {
   });
 };
 
-exports.getServerFlow = (req, res) => {
-  const serverId = req.params.serverId;
-  const port = req.query.port;
-  const type = req.query.type;
-  const time = req.query.time || Date.now();
-  let timeArray = [];
-  if(Array.isArray(time)) {
-    timeArray = time.map(m => +m);
-  } else if(type === 'day') {
-    let i = 0;
-    while(i < 25) {
-      timeArray.push(moment(+time).hour(i).minute(0).second(0).millisecond(0).toDate().valueOf());
-      i++;
-    }
-  } else if (type === 'hour') {
-    let i = 0;
-    while(i < 13) {
-      timeArray.push(moment(+time).minute(i * 5).second(0).millisecond(0).toDate().valueOf());
-      i++;
-    }
-  } else if (type === 'week') {
-    let i = 0;
-    while(i < 8) {
-      timeArray.push(moment(+time).day(i).hour(0).minute(0).second(0).millisecond(0).toDate().valueOf());
-      i++;
-    }
-  }
-  let getFlow;
-  if(port) {
-    getFlow = flow.getServerPortFlow(serverId, +port, timeArray);
-  } else {
-    getFlow = flow.getServerFlow(serverId, timeArray);
-  }
-  getFlow.then(success => {
-    res.send(success);
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
-exports.getServerLastHourFlow = (req, res) => {
-  const serverId = req.params.serverId;
-  let timeArray = [];
-  let i = 0;
-  const now = Date.now();
-  const time = moment(now).add(0 - (moment(now).minute() % 5), 'm').second(0).millisecond(0).toDate().valueOf();
-  while(i < 13) {
-    timeArray.push(moment(time).add(i * 5 - 60, 'm').toDate().valueOf());
-    i++;
-  }
-  const timeRet = timeArray.map((time, index) => {
-    return moment(time).minute();
-  }).slice(0, 12);
-  flow.getServerFlow(serverId, timeArray).then(success => {
-    res.send({
-      time: timeRet,
-      flow: success,
-    });
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
-exports.getServerUserFlow = (req, res) => {
-  const serverId = +req.params.serverId;
-  const type = req.query.type;
-  const time = +req.query.time || Date.now();
-  let timeArray = [];
-  if(Array.isArray(time)) {
-    timeArray = time;
-  } else if(type === 'day') {
-    timeArray.push(moment(time).hour(0).minute(0).second(0).millisecond(0).toDate().valueOf());
-    timeArray.push(moment(time).hour(24).minute(0).second(0).millisecond(0).toDate().valueOf());
-  } else if (type === 'hour') {
-    timeArray.push(moment(time).minute(0).second(0).millisecond(0).toDate().valueOf());
-    timeArray.push(moment(time).minute(60).second(0).millisecond(0).toDate().valueOf());
-  } else if (type === 'week') {
-    timeArray.push(moment(time).day(0).hour(0).minute(0).second(0).millisecond(0).toDate().valueOf());
-    timeArray.push(moment(time).day(7).hour(0).minute(0).second(0).millisecond(0).toDate().valueOf());
-  }
-  flow.getServerUserFlow(serverId, timeArray).then(success => {
-    res.send(success);
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
-exports.getServerPortFlow = (req, res) => {
-  const serverId = +req.params.serverId;
-  const port = +req.params.port;
-  let account = null;
-  knex('account_plugin').select().where({
-    port,
-  }).then(success => {
-    if(!success.length) {
-      return Promise.reject('account not found');
-    }
-    account = success[0];
-    account.data = JSON.parse(account.data);
-    const time = {
-      '2': 7 * 24 * 3600000,
-      '3': 30 * 24 * 3600000,
-      '4': 24 * 3600000,
-      '5': 3600000,
-    };
-    if(account.type >=2 && account.type <= 5) {
-      const timeArray = [account.data.create, account.data.create + time[account.type]];
-      if(account.data.create <= Date.now()) {
-        let i = 0;
-        while(account.data.create + i * time[account.type] <= Date.now()) {
-          timeArray[0] = account.data.create + i * time[account.type];
-          timeArray[1] = account.data.create + (i + 1) * time[account.type];
-          i++;
-        }
-      }
-      return knex('webguiSetting').select().where({ key: 'system' })
-      .then(success => {
-        if(!success.length) {
-          return Promise.reject('settings not found');
-        }
-        success[0].value = JSON.parse(success[0].value);
-        return success[0].value.multiServerFlow;
-      }).then(isMultiServerFlow => {
-        return flow.getServerPortFlow(serverId, port, timeArray, isMultiServerFlow);
-      });
-    } else {
-      return [ 0 ];
-    }
-  }).then(success => {
-    res.send(success);
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
-exports.getAccountServerFlow = (req, res) => {
-  const accountId = +req.params.accountId;
-  const type = req.query.type;
-  const time = +req.query.time || Date.now();
-  let timeArray = [];
-  if(Array.isArray(time)) {
-    timeArray = time;
-  } else if(type === 'day') {
-    timeArray.push(moment(time).hour(0).minute(0).second(0).millisecond(0).toDate().valueOf());
-    timeArray.push(moment(time).hour(24).minute(0).second(0).millisecond(0).toDate().valueOf());
-  } else if (type === 'hour') {
-    timeArray.push(moment(time).minute(0).second(0).millisecond(0).toDate().valueOf());
-    timeArray.push(moment(time).minute(60).second(0).millisecond(0).toDate().valueOf());
-  } else if (type === 'week') {
-    timeArray.push(moment(time).day(0).hour(0).minute(0).second(0).millisecond(0).toDate().valueOf());
-    timeArray.push(moment(time).day(7).hour(0).minute(0).second(0).millisecond(0).toDate().valueOf());
-  }
-  flow.getAccountServerFlow(accountId, timeArray).then(success => {
-    res.send(success);
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
 exports.getUsers = (req, res) => {
   const page = +req.query.page || 1;
   const pageSize = +req.query.pageSize || 20;
@@ -485,7 +206,24 @@ exports.getRecentLoginUsers = (req, res) => {
 };
 
 exports.getRecentOrders = (req, res) => {
+  if(!isAlipayUse) {
+    return res.send([]);
+  }
   alipay.orderListAndPaging({
+    pageSize: 5,
+  }).then(success => {
+    return res.send(success.orders);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.getPaypalRecentOrders = (req, res) => {
+  if(!isPaypalUse) {
+    return res.send([]);
+  }
+  paypal.orderListAndPaging({
     pageSize: 5,
   }).then(success => {
     return res.send(success.orders);
@@ -556,19 +294,10 @@ exports.deleteUserAccount = (req, res) => {
   });
 };
 
-exports.getServerPortLastConnect = (req, res) => {
-  const serverId = +req.params.serverId;
-  const port = +req.params.port;
-  flow.getlastConnectTime(serverId, port)
-  .then(success => {
-    res.send(success);
-  }).catch(err => {
-    console.log(err);
-    res.status(403).end();
-  });
-};
-
 exports.getUserOrders = (req, res) => {
+  if(!isAlipayUse) {
+    return res.send([]);
+  }
   const options = {
     userId: +req.params.userId,
   };
@@ -581,7 +310,32 @@ exports.getUserOrders = (req, res) => {
   });
 };
 
+exports.getPaypalUserOrders = (req, res) => {
+  if(!isPaypalUse) {
+    return res.send([]);
+  }
+  const options = {
+    userId: +req.params.userId,
+  };
+  paypal.orderList(options)
+  .then(success => {
+    res.send(success);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
 exports.getOrders = (req, res) => {
+  if(!isAlipayUse) {
+    return res.send({
+      maxPage: 0,
+      page: 1,
+      pageSize: 0,
+      total: 0,
+      orders: [],
+    });
+  }
   const options = {};
   options.page = +req.query.page || 1;
   options.pageSize = +req.query.pageSize || 20;
@@ -589,6 +343,31 @@ exports.getOrders = (req, res) => {
   options.sort = req.query.sort || 'alipay.createTime_desc';
   options.filter = req.query.filter || '';
   alipay.orderListAndPaging(options)
+  .then(success => {
+    res.send(success);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.getPaypalOrders = (req, res) => {
+  if(!isPaypalUse) {
+    return res.send({
+      maxPage: 0,
+      page: 1,
+      pageSize: 0,
+      total: 0,
+      orders: [],
+    });
+  }
+  const options = {};
+  options.page = +req.query.page || 1;
+  options.pageSize = +req.query.pageSize || 20;
+  options.search = req.query.search || '';
+  options.sort = req.query.sort || 'paypal.createTime_desc';
+  options.filter = req.query.filter || '';
+  paypal.orderListAndPaging(options)
   .then(success => {
     res.send(success);
   }).catch(err => {
@@ -627,5 +406,157 @@ exports.addUser = (req, res) => {
   }).catch(err => {
     console.log(err);
     res.status(403).end();
+  });
+};
+
+exports.sendUserEmail = (req, res) => {
+  const userId = +req.params.userId;
+  const title = req.body.title;
+  const content = req.body.content;
+  req.checkBody('title', 'Invalid title').notEmpty();
+  req.checkBody('content', 'Invalid content').notEmpty();
+  req.getValidationResult().then(result => {
+    if(result.isEmpty()) {
+      return user.getOne(userId).then(user => user.email);
+    }
+    result.throw();
+  }).then(emailAddress => {
+    return email.sendMail(emailAddress, title, content, {
+      type: 'user',
+    });
+  }).then(success => {
+    return res.send(success);
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.getAccountIp = (req, res) => {
+  const accountId = +req.params.accountId;
+  const serverId = +req.params.serverId;
+  let serverInfo;
+  knex('server').select().where({
+    id: serverId,
+  }).then(success => {
+    if(success.length) {
+      serverInfo = success[0];
+    } else {
+      return Promise.reject('server not found');
+    }
+    return account.getAccount({ id: accountId }).then(success => success[0]);
+  }).then(accountInfo => {
+    const port = accountInfo.port;
+    return manager.send({
+      command: 'ip',
+      port,
+    }, {
+      host: serverInfo.host,
+      port: serverInfo.port,
+      password: serverInfo.password,
+    });
+  }).then(ip => {
+    return res.send({ ip });
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.getAccountIpFromAllServer = (req, res) => {
+  const accountId = +req.params.accountId;
+  let accountInfo;
+  account.getAccount({ id: accountId }).then(success => {
+    accountInfo = success[0];
+    return knex('server').select().where({});
+  }).then(servers => {
+    const getIp = (port, serverInfo) => {
+      return manager.send({
+        command: 'ip',
+        port,
+      }, {
+        host: serverInfo.host,
+        port: serverInfo.port,
+        password: serverInfo.password,
+      });
+    };
+    promiseArray = servers.map(server => {
+      return getIp(accountInfo.port, server).catch(err => []);
+    });
+    return Promise.all(promiseArray);
+  }).then(ips => {
+    const result = [];
+    ips.forEach(ip => {
+      ip.forEach(i => {
+        if(result.indexOf(i) < 0) { result.push(i); }
+      });
+    });
+    return res.send({ ip: result });
+  }).catch(err => {
+    console.log(err);
+    res.status(403).end();
+  });
+};
+
+exports.getAccountIpInfo = (req, res) => {
+  const ip = req.params.ip;
+
+  const taobao = ip => {
+    const uri = `http://ip.taobao.com/service/getIpInfo.php?ip=${ ip }`;
+    return rp({ uri, timeout: 10 * 1000 }).then(success => {
+      const decode = (s) => {
+        return unescape(s.replace(/\\u/g, '%u'));
+      };
+      return JSON.parse(decode(success));
+    }).then(success => {
+      if(success.code !== 0) {
+        return Promise.reject(success.code);
+      }
+      const result = [success.data.region + success.data.city, success.data.isp];
+      return result;
+    });
+  };
+
+  const sina = ip => {
+    const uri = `https://int.dpool.sina.com.cn/iplookup/iplookup.php?format=js&ip=${ ip }`;
+    return rp({ uri, timeout: 10 * 1000 }).then(success => {
+      const decode = (s) => {
+        return unescape(s.replace(/\\u/g, '%u'));
+      };
+      return JSON.parse(decode(success.match(/^var remote_ip_info = ([\s\S]+);$/)[1]));
+    }).then(success => {
+      const result = [success.province + success.city, success.isp];
+      return result;
+    });
+  };
+
+  const ipip = ip => {
+    const uri = `https://freeapi.ipip.net/${ ip }`;
+    return rp({ uri, timeout: 10 * 1000 }).then(success => {
+      const decode = (s) => {
+        return unescape(s.replace(/\\u/g, '%u'));
+      };
+      return JSON.parse(decode(success));
+    }).then(success => {
+      const result = [success[1] + success[2], success[4]];
+      return result;
+    });
+  };
+
+  // const getIpFunction = [taobao, sina, ipip];
+  // const random = +Math.random().toString().substr(2) % getIpFunction.length;
+  // getIpFunction[random](ip)
+  const getIpFunction = ip => {
+    return taobao(ip).catch(() => {
+      return sina(ip);
+    }).catch(() => {
+      return ipip(ip);
+    });
+  };
+  getIpFunction(ip)
+  .then(success => {
+    return res.send(success);
+  }).catch(err => {
+    return res.send(['', '']);
   });
 };

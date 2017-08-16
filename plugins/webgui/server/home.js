@@ -42,9 +42,9 @@ exports.signup = (req, res) => {
   }).then(success => {
     if(success[0] > 1) {
       const userId = success[0];
-      let port = 50000;
+      // let port = 50000;
       return knex('webguiSetting').select().where({
-        key: 'system',
+        key: 'account',
       })
       .then(success => JSON.parse(success[0].value))
       .then(success => {
@@ -52,11 +52,52 @@ exports.signup = (req, res) => {
         if(!success.accountForNewUser.isEnable) {
           return;
         }
-        return knex('account_plugin').select().orderBy('port', 'DESC').limit(1)
-        .then(success => {
-          if(success.length) {
-            port = success[0].port + 1;
-          }
+        const getNewPort = () => {
+          return knex('webguiSetting').select().where({
+            key: 'account',
+          }).then(success => {
+            if(!success.length) { return Promise.reject('settings not found'); }
+            success[0].value = JSON.parse(success[0].value);
+            return success[0].value.port;
+          }).then(port => {
+            if(port.random) {
+              const getRandomPort = () => Math.floor(Math.random() * (port.end - port.start + 1) + port.start);
+              let retry = 0;
+              let myPort = getRandomPort();
+              const checkIfPortExists = port => {
+                let myPort = port;
+                return knex('account_plugin').select()
+                .where({ port }).then(success => {
+                  if(success.length && retry <= 30) {
+                    retry++;
+                    myPort = getRandomPort();
+                    return checkIfPortExists(myPort);
+                  } else if (success.length && retry > 30) {
+                    return Promise.reject('Can not get a random port');
+                  } else {
+                    return myPort;
+                  }
+                });
+              };
+              return checkIfPortExists(myPort);
+            } else {
+              return knex('account_plugin').select()
+              .whereBetween('port', [port.start, port.end])
+              .orderBy('port', 'DESC').limit(1).then(success => {
+                if(success.length) {
+                  return success[0].port + 1;
+                }
+                return port.start;
+              });
+            }
+          });
+        };
+        // return knex('account_plugin').select().orderBy('port', 'DESC').limit(1)
+        // .then(success => {
+        //   if(success.length) {
+        //     port = success[0].port + 1;
+        //   }
+        getNewPort().then(port => {
           return account.addAccount(newUserAccount.type || 5, {
             user: userId,
             port,
@@ -128,7 +169,7 @@ exports.sendCode = (req, res) => {
     return Promise.reject('invalid email');
   }).then(() => {
     return knex('webguiSetting').select().where({
-      key: 'system',
+      key: 'account',
     })
     .then(success => JSON.parse(success[0].value))
     .then(success => {
@@ -178,6 +219,7 @@ exports.sendResetPasswordEmail = (req, res) => {
     return emailPlugin.sendMail(email, 'ss密码重置', '请访问下列地址重置您的密码：\n' + address, {
       ip,
       session,
+      type: 'reset',
     });
   }).then(success => {
     return user.edit({

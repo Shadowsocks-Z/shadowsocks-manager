@@ -5,6 +5,7 @@ const checkAccount = appRequire('plugins/account/checkAccount');
 const config = appRequire('services/config').all();
 
 const addAccount = async (type, options) => {
+  checkAccount.deleteCheckAccountTimePort(options.port);
   if(type === 6 || type === 7) {
     type = 3;
   }
@@ -82,6 +83,7 @@ const delAccount = async (id) => {
 };
 
 const editAccount = async (id, options) => {
+  checkAccount.deleteCheckAccountTimePort(options.port);
   const account = await knex('account_plugin').select().where({ id }).then(success => {
     if(success.length) {
       return success[0];
@@ -105,6 +107,7 @@ const editAccount = async (id, options) => {
     update.port = +options.port;
   }
   await knex('account_plugin').update(update).where({ id });
+  await checkAccount.checkServer();
   return;
 };
 
@@ -223,21 +226,62 @@ const setAccountLimit = async (userId, accountId, orderType) => {
   if(orderType === 6) { limit = 3; }
   if(orderType === 7) { limit = 12; }
   const flow = {};
+  const paymentInfo = await knex('webguiSetting').select().where({
+    key: 'payment',
+  }).then(success => {
+    if(!success.length) {
+      return Promise.reject('settings not found');
+    }
+    success[0].value = JSON.parse(success[0].value);
+    return success[0].value;
+  });
   for (const p in payType) {
-    if(config.plugins.account.pay[p]) {
-      flow[payType[p]] = config.plugins.account.pay[p].flow;
+    if(paymentInfo[p].alipay) {
+      flow[payType[p]] = paymentInfo[p].flow * 1000 * 1000;
     }
   };
   if(!accountId) {
-    const port = await knex('account_plugin').select()
-    .orderBy('port', 'DESC').limit(1)
-    .then(success => {
-      if(success.length) {
-        return success[0].port + 1;
-      } else {
-        return 50000;
-      }
-    });
+    const getNewPort = () => {
+      return knex('webguiSetting').select().where({
+        key: 'account',
+      }).then(success => {
+        if(!success.length) { return Promise.reject('settings not found'); }
+        success[0].value = JSON.parse(success[0].value);
+        return success[0].value.port;
+      }).then(port => {
+        if(port.random) {
+          const getRandomPort = () => Math.floor(Math.random() * (port.end - port.start + 1) + port.start);
+          let retry = 0;
+          let myPort = getRandomPort();
+          const checkIfPortExists = port => {
+            let myPort = port;
+            return knex('account_plugin').select()
+            .where({ port }).then(success => {
+              if(success.length && retry <= 30) {
+                retry++;
+                myPort = getRandomPort();
+                return checkIfPortExists(myPort);
+              } else if (success.length && retry > 30) {
+                return Promise.reject('Can not get a random port');
+              } else {
+                return myPort;
+              }
+            });
+          };
+          return checkIfPortExists(myPort);
+        } else {
+          return knex('account_plugin').select()
+          .whereBetween('port', [port.start, port.end])
+          .orderBy('port', 'DESC').limit(1).then(success => {
+            if(success.length) {
+              return success[0].port + 1;
+            }
+            return port.start;
+          });
+        }
+      });
+    };
+    const port = await getNewPort();
     await addAccount(orderType, {
       user: userId,
       port,
@@ -280,11 +324,14 @@ const setAccountLimit = async (userId, accountId, orderType) => {
     accountData.limit += 1;
     accountData.create -= countTime;
   }
+  let port = await getAccount({ id: accountId }).then(success => success[0].port);
   await knex('account_plugin').update({
     type: orderType >= 6 ? 3 : orderType,
     data: JSON.stringify(accountData),
     autoRemove: 0,
   }).where({ id: accountId });
+  checkAccount.deleteCheckAccountTimePort(port);
+  await checkAccount.checkServer();
   return;
 };
 

@@ -68,7 +68,7 @@ const checkFlow = async (server, port, startTime, endTime) => {
   let isMultiServerFlow = false;
   try {
     isMultiServerFlow = await knex('webguiSetting').select().
-    where({ key: 'system' })
+    where({ key: 'account' })
     .then(success => {
       if(!success.length) {
         return Promise.reject('settings not found');
@@ -77,16 +77,30 @@ const checkFlow = async (server, port, startTime, endTime) => {
       return success[0].value.multiServerFlow;
     });
   } catch (err) {}
-  const flow = await knex('saveFlow')
-  .sum('flow as sumFlow')
-  .groupBy('port')
-  .select(['port'])
-  .where(isMultiServerFlow ? { port } : { id: server, port })
-  .whereBetween('time', [startTime, endTime]);
-  return flow[0] ? flow[0].sumFlow : 0;
+  const serverId = isMultiServerFlow ? null : server;
+  const userFlow = await flow.getFlowFromSplitTime(serverId, port, startTime, endTime);
+  return userFlow;
 };
 
+const checkAccountTime = {};
+
+const deleteCheckAccountTimePort = port => {
+  const reg = new RegExp('^\d{1,3}\|' + port + '$');
+  for(cat in checkAccountTime) {
+    if(cat.match(reg)) {
+      delete checkAccountTime[cat];
+    }
+  }
+};
+let lastCheck = 0;
 const checkServer = async () => {
+  if(!lastCheck) {
+    lastCheck = Date.now();
+  } else if(Date.now() - lastCheck <= 29 * 1000) {
+    return;
+  }
+  lastCheck = Date.now();
+  logger.info('check account');
   const account = await knex('account_plugin').select();
   account.forEach(a => {
     if(a.type >= 2 && a.type <= 5) {
@@ -114,7 +128,7 @@ const checkServer = async () => {
   let isMultiServerFlow = false;
   try {
     isMultiServerFlow = await knex('webguiSetting').select().
-    where({ key: 'system' })
+    where({ key: 'account' })
     .then(success => {
       if(!success.length) {
         return Promise.reject('settings not found');
@@ -132,10 +146,14 @@ const checkServer = async () => {
           port: s.port,
           password: s.password,
         });
+        port.list = {};
+        port.forEach(f => {
+          port.list[f.port] = true;
+        });
         port.exist = number => {
-          return !!port.filter(f => f.port === number)[0];
+          return !!port.list[number];
         };
-        account.forEach(async a => {
+        const checkAccountStatus = async a => {
           const accountServer = a.server ? JSON.parse(a.server) : a.server;
           if(accountServer) {
             newAccountServer = accountServer.filter(f => {
@@ -164,17 +182,26 @@ const checkServer = async () => {
             while(startTime + timePeriod <= Date.now()) {
               startTime += timePeriod;
             }
-            const flow = await checkFlow(s.id, a.port, startTime, Date.now());
-            if(isMultiServerFlow && flow >= data.flow) {
+            let flow = -1;
+            if(!checkAccountTime['' + s.id + '|' + a.port] || (checkAccountTime['' + s.id + '|' + a.port] && Date.now() >= checkAccountTime['' + s.id + '|' + a.port])) {
+              flow = await checkFlow(s.id, a.port, startTime, Date.now());
+              const nextTime = (data.flow * (isMultiServerFlow ? 1 : s.scale) - flow) / 200000000 * 60 * 1000;
+              if(nextTime <= 0) {
+                checkAccountTime['' + s.id + '|' + a.port] = Date.now() + 10 * 60 * 1000;
+              } else {
+                checkAccountTime['' + s.id + '|' + a.port] = Date.now() + nextTime;
+              }
+            }
+            if(flow >= 0 && isMultiServerFlow && flow >= data.flow) {
               port.exist(a.port) && delPort(a, s);
               return;
-            } else if (!isMultiServerFlow && flow >= data.flow * s.scale) {
+            } else if (flow >= 0 && !isMultiServerFlow && flow >= data.flow * s.scale) {
               port.exist(a.port) && delPort(a, s);
               return;
             } else if(data.create + data.limit * timePeriod <= Date.now() || data.create >= Date.now()) {
               port.exist(a.port) && delPort(a, s);
               return;
-            } else if(!port.exist(a.port)) {
+            } else if(!port.exist(a.port) && flow >= 0) {
               addPort(a, s);
               return;
             }
@@ -185,7 +212,12 @@ const checkServer = async () => {
             addPort(a, s);
             return;
           }
+        };
+        const checkAccountStatusPromises = [];
+        account.forEach(a => {
+          checkAccountStatusPromises.push(checkAccountStatus(a));
         });
+        Promise.all(checkAccountStatusPromises);
         port.forEach(async p => {
           if(!account.exist(p.port)) {
             delPort(p, s);
@@ -207,11 +239,11 @@ exports.sendMessage = sendMessage;
 exports.addPort = addPort;
 exports.delPort = delPort;
 exports.changePassword = changePassword;
+exports.deleteCheckAccountTimePort = deleteCheckAccountTimePort;
 
 setTimeout(() => {
-  // TODO: fix load plugins
   checkServer();
-}, 10 * 1000);
-setInterval(() => {
+}, 8 * 1000);
+cron.minute(() => {
   checkServer();
-}, 60 * 1000);
+}, 2);

@@ -1,8 +1,9 @@
 const app = angular.module('app');
 
-app.controller('MainController', ['$scope', '$localStorage', '$location', '$http',
-  ($scope, $localStorage, $location, $http) => {
+app.controller('MainController', ['$scope', '$localStorage', '$location', '$http', '$translate', 'languageDialog', '$state',
+  ($scope, $localStorage, $location, $http, $translate, languageDialog, $state) => {
     $scope.version = window.ssmgrVersion;
+    $scope.config = JSON.parse(window.ssmgrConfig);
     $localStorage.$default({
       admin: {},
       home: {},
@@ -24,9 +25,10 @@ app.controller('MainController', ['$scope', '$localStorage', '$location', '$http
       return iOSSafari && standalone;
     };
     if(isSafari() && $location.url() === '/home/index' && $localStorage.home.url !== '/home/index') {
-      location.href = $localStorage.home.url;
+      location.href = $localStorage.home.url || '/';
     }
     $scope.$on('$stateChangeSuccess', () => {
+      $scope.currentState = $state.current.name;
       $localStorage.home.url = $location.url();
     });
 
@@ -51,5 +53,9 @@ app.controller('MainController', ['$scope', '$localStorage', '$location', '$http
         console.log('Service Worker failed to boot', error);
       });
     }
+    $scope.chooseLanguage = () => {
+      languageDialog.show();
+    };
+    $translate.use($localStorage.language || navigator.language || 'zh-CN');
   }
 ]);

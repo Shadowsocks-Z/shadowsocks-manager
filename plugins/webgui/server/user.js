@@ -1,5 +1,3 @@
-'use strict';
-
 const user = appRequire('plugins/user/index');
 const account = appRequire('plugins/account/index');
 const flow = appRequire('plugins/flowSaver/flow');
@@ -112,7 +110,7 @@ exports.getServerPortFlow = (req, res) => {
           i++;
         }
       }
-      return knex('webguiSetting').select().where({ key: 'system' })
+      return knex('webguiSetting').select().where({ key: 'account' })
       .then(success => {
         if(!success.length) {
           return Promise.reject('settings not found');
@@ -180,8 +178,18 @@ exports.createOrder = (req, res) => {
   else if(orderType === 'season') { type = 6; }
   else if(orderType === 'year') { type = 7; }
   else { return res.status(403).end(); }
-  amount = config.plugins.account.pay[orderType].price;
-  alipay.createOrder(userId, accountId, amount, type).then(success => {
+  knex('webguiSetting').select().where({
+    key: 'payment',
+  }).then(success => {
+    if(!success.length) {
+      return Promise.reject('settings not found');
+    }
+    success[0].value = JSON.parse(success[0].value);
+    return success[0].value;
+  }).then(success => {
+    amount = success[orderType].alipay;
+    return alipay.createOrder(userId, accountId, amount, type);
+  }).then(success => {
     return res.send(success);
   }).catch(err => {
     console.log(err);
@@ -207,11 +215,27 @@ exports.alipayCallback = (req, res) => {
 };
 
 exports.getPrice = (req, res) => {
-  const price = {};
-  for(const p in config.plugins.account.pay) {
-    price[p] = config.plugins.account.pay[p].price;
-  }
-  return res.send(price);
+  const price = {
+    alipay: {},
+    paypal: {},
+  };
+  knex('webguiSetting').select().where({
+    key: 'payment',
+  }).then(success => {
+    if(!success.length) {
+      return Promise.reject('settings not found');
+    }
+    success[0].value = JSON.parse(success[0].value);
+    return success[0].value;
+  }).then(success => {
+    for(const s in success) {
+      price.alipay[s] = success[s].alipay;
+      price.paypal[s] = success[s].paypal;
+    }
+    return res.send(price);
+  }).catch(() => {
+    res.status(403).end();
+  });
 };
 
 exports.getNotice = (req, res) => {
@@ -225,13 +249,13 @@ exports.getNotice = (req, res) => {
 
 exports.getAlipayStatus = (req, res) => {
   return res.send({
-    status: config.plugins.alipay.use,
+    status: config.plugins.alipay && config.plugins.alipay.use,
   });
 };
 
 exports.getMultiServerFlowStatus = (req, res) => {
   knex('webguiSetting').select().where({
-    key: 'system',
+    key: 'account',
   }).then(success => {
     if(!success.length) {
       return Promise.reject('settings not found');
@@ -244,4 +268,54 @@ exports.getMultiServerFlowStatus = (req, res) => {
     console.log(err);
     res.status(403).end();
   });
+};
+
+const paypal = appRequire('plugins/paypal/index');
+
+exports.createPaypalOrder = (req, res) => {
+  const userId = req.session.user;
+  const accountId = req.body.accountId;
+  const orderType = req.body.orderType;
+  let type;
+  let amount;
+  if(orderType === 'week') { type = 2; }
+  else if(orderType === 'month') { type = 3; }
+  else if(orderType === 'day') { type = 4; }
+  else if(orderType === 'hour') { type = 5; }
+  else if(orderType === 'season') { type = 6; }
+  else if(orderType === 'year') { type = 7; }
+  else { return res.status(403).end(); }
+  // amount = config.plugins.account.pay[orderType].price;
+  knex('webguiSetting').select().where({
+    key: 'payment',
+  }).then(success => {
+    if(!success.length) {
+      return Promise.reject('settings not found');
+    }
+    success[0].value = JSON.parse(success[0].value);
+    return success[0].value;
+  }).then(success => {
+    amount = success[orderType].paypal;
+    return paypal.createOrder(userId, accountId, amount, type);
+  }).then(success => {
+    res.send(success);
+  })
+  .catch(error => {
+    res.status(403).end();
+  });
+};
+
+exports.executePaypalOrder = (req, res) => {
+  paypal.executeOrder(req.body)
+  .then(success => {
+    res.send(success);
+  })
+  .catch(error => {
+    res.status(403).end();
+  });
+};
+
+exports.paypalCallback = (req, res) => {
+  console.log(req.body);
+  return res.send('success');
 };

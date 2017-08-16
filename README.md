@@ -158,8 +158,21 @@ Usage: ssmgr [options]
 
 First, ssmgr will read the config file in `--config`, and other parameters(`-detsmp`) will replace the config file values.
 
+### Translate
+
+If your want to help to translate it to other languages, please edit files [here](https://github.com/shadowsocks/shadowsocks-manager/tree/dev/plugins/webgui/public/translate) and give me a pull request.
+
 ### Telegram
 Join the group if you have some problem: [https://t.me/ssmgr](https://t.me/ssmgr)
+
+### VPS recommendation
+
+* [Linode](https://www.linode.com/?r=bbc24323b3adaf3d74f242fd958d91b55cc6fdea
+)
+
+* [DigitalOcean](https://m.do.co/c/d43891b79a52)
+
+* [Vultr](http://www.vultr.com/?ref=6926595)
 
 ### Donate
 If you find this project helpful, please consider making a donation:  

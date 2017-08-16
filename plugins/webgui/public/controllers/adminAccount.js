@@ -93,19 +93,23 @@ app.controller('AdminAccountController', ['$scope', '$state', '$stateParams', '$
         return {
           background: 'red-50', 'border-color': 'red-300',
         };
+      } else if(account.autoRemove) {
+        return {
+          background: 'lime-50', 'border-color': 'lime-300',
+        };
       }
       return {};
     };
   }
 ])
-.controller('AdminAccountPageController', ['$scope', '$state', '$stateParams', '$http', '$mdMedia', '$q', 'adminApi', '$timeout', '$interval', 'qrcodeDialog',
-  ($scope, $state, $stateParams, $http, $mdMedia, $q, adminApi, $timeout, $interval, qrcodeDialog) => {
+.controller('AdminAccountPageController', ['$scope', '$state', '$stateParams', '$http', '$mdMedia', '$q', 'adminApi', '$timeout', '$interval', 'qrcodeDialog', 'ipDialog',
+  ($scope, $state, $stateParams, $http, $mdMedia, $q, adminApi, $timeout, $interval, qrcodeDialog, ipDialog) => {
     $scope.setTitle('账号');
     $scope.setMenuButton('arrow_back', 'admin.account');
     $q.all([
       $http.get(`/api/admin/account/${ $stateParams.accountId }`),
       $http.get('/api/admin/server'),
-      $http.get('/api/admin/setting'),
+      $http.get('/api/admin/setting/account'),
     ]).then(success => {
       $scope.account = success[0].data;
       $scope.servers = success[1].data.map(server => {
@@ -115,7 +119,7 @@ app.controller('AdminAccountController', ['$scope', '$state', '$stateParams', '$
         return server;
       });
       $scope.getServerPortData($scope.servers[0], $scope.account.port);
-      $scope.isMultiServerFlow = success[2].data.value.multiServerFlow;
+      $scope.isMultiServerFlow = success[2].data.multiServerFlow;
     }).catch(err => {
       $state.go('admin.account');
     });
@@ -128,8 +132,11 @@ app.controller('AdminAccountController', ['$scope', '$state', '$stateParams', '$
       adminApi.getServerPortData(serverId, port).then(success => {
         $scope.serverPortFlow = success.serverPortFlow;
         $scope.lastConnect = success.lastConnect;
-        const maxFlow = $scope.account.data.flow * ($scope.isMultiServerFlow ? 1 : server.scale);
-        server.isFlowOutOfLimit = $scope.serverPortFlow >= maxFlow;
+        let maxFlow = 0;
+        if($scope.account.data) {
+          maxFlow = $scope.account.data.flow * ($scope.isMultiServerFlow ? 1 : server.scale);
+        }
+        server.isFlowOutOfLimit = maxFlow ? ($scope.serverPortFlow >= maxFlow) : false;
       });
       $scope.getChartData(serverId);
       $scope.servers.forEach((server, index) => {
@@ -317,6 +324,9 @@ app.controller('AdminAccountController', ['$scope', '$state', '$stateParams', '$
       if(!userId) { return; }
       $state.go('admin.userPage', { userId });
     };
+    $scope.clientIp = (serverId, accountId) => {
+      ipDialog.show(serverId, accountId);
+    };
   }
 ])
 .controller('AdminAddAccountController', ['$scope', '$state', '$stateParams', '$http', '$mdBottomSheet', 'alertDialog',
@@ -469,6 +479,9 @@ app.controller('AdminAccountController', ['$scope', '$state', '$stateParams', '$
     };
     $scope.setStartTime = (number) => {
       $scope.account.time += number;
+    };
+    $scope.setStartTimeToCurrentTime = () => {
+      $scope.account.time = Date.now();
     };
     $scope.setLimit = (number) => {
       $scope.account.limit += number;
